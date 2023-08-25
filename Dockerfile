@@ -1,24 +1,30 @@
 # syntax=docker/dockerfile:1.4
 
-FROM --platform=$BUILDPLATFORM python:3.7-alpine AS builder
-EXPOSE 8000
-WORKDIR /app 
-COPY requirements.txt /app
-RUN pip3 install -r requirements.txt --no-cache-dir
-COPY . /app 
-ENTRYPOINT ["python3"] 
-CMD ["manage.py", "runserver", "0.0.0.0:8000"]
+# if you're doing anything beyond your local machine, please pin this to a specific version at https://hub.docker.com/_/node/
+FROM node:lts AS development
 
-FROM builder as dev-envs
-RUN <<EOF
-apk update
-apk add git
-EOF
+# set our node environment, either development or production
+# defaults to production, compose overrides this to development on build and run
+ARG NODE_ENV=production
+ENV NODE_ENV $NODE_ENV
 
-RUN <<EOF
-addgroup -S docker
-adduser -S --shell /bin/bash --ingroup docker vscode
-EOF
-# install Docker tools (cli, buildx, compose)
-COPY --from=gloursdocker/docker / /
-CMD ["manage.py", "runserver", "0.0.0.0:8000"]
+WORKDIR /code
+
+# default to port 80 for node, and 9229 and 9230 (tests) for debug
+ARG PORT=80
+ENV PORT $PORT
+EXPOSE $PORT 9229 9230
+
+COPY package.json /code/package.json
+COPY package-lock.json /code/package-lock.json
+RUN npm ci
+
+
+# copy in our source code last, as it changes the most
+COPY . /code
+
+# if you want to use npm start instead, then use `docker run --init in production`
+# so that signals are passed properly. Note the code in index.js is needed to catch Docker signals
+# using node here is still more graceful stopping then npm with --init afaik
+# I still can't come up with a good production way to run with npm and graceful shutdown
+CMD [ "node", "src/index.js" ]
